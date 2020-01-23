@@ -1,4 +1,4 @@
-from Network1 import Generator, Discriminator
+from Network1 import Generator, Discriminator, Attention
 
 import matplotlib.pyplot as plt
 plt.switch_backend('agg')
@@ -32,12 +32,15 @@ def vgg_loss(y_true, y_pred):
     loss_model.trainable = False
     return K.mean(K.square(loss_model(y_true) - loss_model(y_pred)))
 
-def get_gan_network(discriminator, shape, generator, optimizer):
+def get_gan_network(discriminator, shape, generator, optimizer, attention, image_shape):
     discriminator.trainable = False
     gan_input = Input(shape=shape)
+    att_input = Input(shape=image_shape)
     x = generator(gan_input)
-    gan_output = discriminator(x)
-    gan = Model(inputs=gan_input, outputs=[x,gan_output])
+    y = attention(att_input)
+    z = x*y+att_input
+    gan_output = discriminator(z)
+    gan = Model(inputs=[gan_input, att_input], outputs=[z,gan_output])
     gan.compile(loss=[vgg_loss, "binary_crossentropy"],
                 loss_weights=[1., 1e-3],
                 optimizer=optimizer)
@@ -105,6 +108,13 @@ def lr_images(images_real , downscale):
     images_lr = array(images)
     return images_lr
 
+def lr_images_scaled(images_real_lr , downscale):    
+    images = []
+    for img in  range(len(images_real_lr)):
+        images.append(imresize(images_real_lr[img], [images_real_lr[img].shape[0]*downscale,images_real[img].shape[1]*downscale], interp='bicubic', mode=None))
+    images_lr_scaled = array(images)
+    return images_lr_scaled
+
 def preprocess_HR(x):
     return np.divide(x.astype(np.float32), 127.5) - np.ones_like(x,dtype=np.float32)
 
@@ -140,6 +150,9 @@ x_train_hr = normalize(x_train_hr)
 x_train_lr = lr_images(x_train, 4)
 x_train_lr = normalize(x_train_lr)
 
+x_train_lr_scaled = lr_images_scaled(x_train_lr, 4)
+x_train_lr_scaled = normalize(x_train_lr_scaled)
+
 
 x_test_hr = hr_images(x_test)
 x_test_hr = normalize(x_test_hr)
@@ -148,7 +161,7 @@ x_test_lr = lr_images(x_test, 4)
 x_test_lr = normalize(x_test_lr)
 
 print("data processed")
-print(len(x_train_lr))
+print(len(x_train_lr_scaled))
 
 def plot_generated_images(epoch,generator, examples=3 , dim=(1, 3), figsize=(15, 5)):
     
@@ -188,13 +201,15 @@ def train(epochs=1, batch_size=128):
     
     generator = Generator(shape).generator()
     discriminator = Discriminator(image_shape).discriminator()
+    attention = Attention(image_shape).attention()
 
     adam = Adam(lr=1E-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
     generator.compile(loss=vgg_loss, optimizer=adam)
     discriminator.compile(loss="binary_crossentropy", optimizer=adam)
+    attention.compile(loss="mean_squared_error", optimizer=adam)
     
     shape = (image_shape[0]//downscale_factor, image_shape[1]//downscale_factor, 3)
-    gan = get_gan_network(discriminator, shape, generator, adam)
+    gan = get_gan_network(discriminator, shape, generator, adam, attention, image_shape)
 
     for e in range(1, epochs+1):
         print ('-'*15, 'Epoch %d' % e, '-'*15)
@@ -204,7 +219,10 @@ def train(epochs=1, batch_size=128):
             
             image_batch_hr = x_train_hr[rand_nums]
             image_batch_lr = x_train_lr[rand_nums]
+            image_batch_lr_scaled = x_train_lr_scaled[rand_nums]
             generated_images_sr = generator.predict(image_batch_lr)
+            attention_images = attention.predict(image_batch_lr_scaled)
+            generated_images_sr_scaled = generated_images_sr*attention_images+image_batch_lr_scaled
 
             real_data_Y = np.ones(batch_size) - np.random.random_sample(batch_size)*0.2
             fake_data_Y = np.random.random_sample(batch_size)*0.2
@@ -212,16 +230,17 @@ def train(epochs=1, batch_size=128):
             discriminator.trainable = True
             
             d_loss_real = discriminator.train_on_batch(image_batch_hr, real_data_Y)
-            d_loss_fake = discriminator.train_on_batch(generated_images_sr, fake_data_Y)
+            d_loss_fake = discriminator.train_on_batch(generated_images_sr_scaled, fake_data_Y)
             #d_loss = 0.5 * np.add(d_loss_fake, d_loss_real)
             
             rand_nums = np.random.randint(0, x_train_hr.shape[0], size=batch_size)
             image_batch_hr = x_train_hr[rand_nums]
             image_batch_lr = x_train_lr[rand_nums]
+            image_batch_lr_scaled = x_train_lr_scaled[rand_nums]
 
             gan_Y = np.ones(batch_size) - np.random.random_sample(batch_size)*0.2
             discriminator.trainable = False
-            loss_gan = gan.train_on_batch(image_batch_lr, [image_batch_hr,gan_Y])
+            loss_gan = gan.train_on_batch([image_batch_lr,image_batch_lr_scaled], [image_batch_hr,gan_Y])
             
         print("Loss HR , Loss LR, Loss GAN")
         print(d_loss_real, d_loss_fake, loss_gan)

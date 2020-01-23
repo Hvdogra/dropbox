@@ -12,10 +12,10 @@ from keras.layers.core import Activation
 from keras.layers.normalization import BatchNormalization
 from keras.layers.convolutional import UpSampling2D
 from keras.layers.core import Flatten
-from keras.layers import Input
-from keras.layers.convolutional import Conv2D, Conv2DTranspose
+from keras.layers import Input, concatenate
+from keras.layers.convolutional import Conv2D, Conv2DTranspose, MaxPooling2D, AveragePooling2D
 from keras.models import Model
-from keras.layers.advanced_activations import LeakyReLU, PReLU
+from keras.layers.advanced_activations import LeakyReLU, PReLU, ReLU
 from keras.layers import add
 
 
@@ -34,6 +34,24 @@ def res_block_gen(model, kernal_size, filters, strides):
     model = add([gen, model])
     
     return model
+
+def dense_factor(model, kernal_size, filters, strides):
+
+    model = BatchNormalization(momentum = 0.5)(model)
+    model = Conv2D(filters = filters, kernel_size = kernal_size, strides = strides, padding = "same")(model)
+    model = LeakyReLU(alpha = 0.2)(model)
+
+    return model
+
+def dense_block(model, kernal_size, filters, strides):
+
+    gen = model
+
+    for i in range(4):
+        x = dense_factor(gen, kernal_size, filters, strides)
+        concatenated_inputs = concatenate([concatenated_inputs, x], axis=3)
+
+    return concatenated_inputs
     
     
 def up_sampling_block(model, kernal_size, filters, strides):
@@ -123,3 +141,55 @@ class Discriminator(object):
         discriminator_model = Model(inputs = dis_input, outputs = model)
         
         return discriminator_model
+
+
+# Network Architecture is same as given in Paper https://arxiv.org/pdf/1609.04802.pdf
+class Attention(object):
+
+    def __init__(self, image_shape):
+        
+        self.image_shape = image_shape
+    
+    def attention(self):
+        
+        dis_input = Input(shape = self.image_shape)
+        
+        model = Conv2D(filters = 64, kernel_size = 3, strides = 1, padding = "same")(dis_input)
+        model = LeakyReLU(alpha = 0.2)(model)
+
+        model = Conv2D(filters = 64, kernel_size = 3, strides = 1, padding = "same")(model)
+        model = LeakyReLU(alpha = 0.2)(model)
+
+        stop_one = model
+
+        model = MaxPooling2D(pool_size=(2,2))
+
+        model = dense_block(model, 3, 64, 1)
+        stop_two = model
+        model = AveragePooling2D(pool_size=(2,2))
+
+        model = dense_block(model, 3, 64, 1)
+        stop_three = model
+        model = AveragePooling2D(pool_size=(2,2))
+
+        model = dense_block(model, 3, 64, 1)
+        model = up_sampling_block(model, 3, 256, 1)
+        model = add([stop_three, model])
+
+        model = dense_block(model, 3, 64, 1)
+        model = up_sampling_block(model, 3, 256, 1)
+        model = add([stop_two, model])
+
+        model = dense_block(model, 3, 64, 1)
+        model = up_sampling_block(model, 3, 256, 1)
+        model = add([stop_one, model])
+
+        model = Conv2D(filters = 64, kernel_size = 3, strides = 1, padding = "same")(model)
+        model = LeakyReLU(alpha = 0.2)(model)
+
+        model = Conv2D(filters = 3, kernel_size = 3, strides = 1, padding = "same")(model)
+        model = ReLU()(model)
+
+        attention_model = Model(inputs = dis_input, outputs = model)
+        
+        return attention_model
