@@ -3,7 +3,9 @@ from Network3 import Generator, Discriminator, Attention, ResidueAdd
 import matplotlib.pyplot as plt
 plt.switch_backend('agg')
 from keras.applications.vgg19 import VGG19
-from keras.layers.convolutional import UpSampling2D
+from keras.layers.core import Activation
+from keras.layers.convolutional import UpSampling2D, Conv2D
+from keras.layers.advanced_activations import LeakyReLU, PReLU
 from keras.models import Model
 from keras.layers import add, multiply, subtract, Dense, Reshape, Flatten
 from keras.optimizers import SGD, Adam, RMSprop
@@ -23,6 +25,18 @@ import os
 np.random.seed(10)
 image_shape = (192,192,3)
 
+
+def up_sampling_block(model, kernal_size, filters, strides):
+    
+    # In place of Conv2D and UpSampling2D we can also use Conv2DTranspose (Both are used for Deconvolution)
+    # Even we can have our own function for deconvolution (i.e one made in Utils.py)
+    #model = Conv2DTranspose(filters = filters, kernel_size = kernal_size, strides = strides, padding = "same")(model)
+    model = Conv2D(filters = filters, kernel_size = kernal_size, strides = strides, padding = "same")(model)
+    model = UpSampling2D(size = 2)(model)
+    model = LeakyReLU(alpha = 0.2)(model)
+    
+    return model
+
 def vgg_loss(y_true, y_pred):
     
     vgg19 = VGG19(include_top=False, weights='imagenet', input_shape=image_shape)
@@ -37,15 +51,19 @@ def get_gan_network(discriminator, shape, generator, optimizer, residue):
     discriminator.trainable = False
     gan_input = Input(shape=shape)
     # res_input = Input(shape=shape)
-    x = generator(gan_input)
-    model1 = Model(inputs=residue.input, outputs=residue.get_layer('pool_24').output)(gan_input)
-    model2 = Model(inputs=residue.input, outputs=residue.get_layer('pool_12').output)(gan_input)
-    model3 = Model(inputs=residue.input, outputs=residue.get_layer('pool_6').output)(gan_input)
-    model4 = Model(inputs=residue.input, outputs=residue.get_layer('pool_3').output)(gan_input)
-    model5 = Model(inputs=residue.input, outputs=residue.get_layer('sample_3').output)(gan_input)
-    model6 = Model(inputs=residue.input, outputs=residue.get_layer('sample_6').output)(gan_input)
-    model7 = Model(inputs=residue.input, outputs=residue.get_layer('sample_12').output)(gan_input)
-    model8 = Model(inputs=residue.input, outputs=residue.get_layer('sample_24').output)(gan_input)
+    # x = generator(gan_input)
+    x = Model(inputs=generator.input, outputs=generator.get_layer('add_17').output)(gan_input)
+    x1 = Model(inputs=residue.input, outputs=residue.get_layer('conv2d_46').output)(gan_input)
+    y = Model(inputs=residue.input, outputs=residue.get_layer('leaky_re_lu_22').output)(gan_input)
+
+    # model1 = Model(inputs=residue.input, outputs=residue.get_layer('pool_24').output)(gan_input)
+    # model2 = Model(inputs=residue.input, outputs=residue.get_layer('pool_12').output)(gan_input)
+    # model3 = Model(inputs=residue.input, outputs=residue.get_layer('pool_6').output)(gan_input)
+    # model4 = Model(inputs=residue.input, outputs=residue.get_layer('pool_3').output)(gan_input)
+    # model5 = Model(inputs=residue.input, outputs=residue.get_layer('sample_3').output)(gan_input)
+    # model6 = Model(inputs=residue.input, outputs=residue.get_layer('sample_6').output)(gan_input)
+    # model7 = Model(inputs=residue.input, outputs=residue.get_layer('sample_12').output)(gan_input)
+    # model8 = Model(inputs=residue.input, outputs=residue.get_layer('sample_24').output)(gan_input)
     
     # model1 = residue(gan_input).get_layer("pool_24")
     # model2 = residue(gan_input).get_layer("pool_12")
@@ -55,28 +73,35 @@ def get_gan_network(discriminator, shape, generator, optimizer, residue):
     # model6 = residue(gan_input).get_layer("sample_6")
     # model7 = residue(gan_input).get_layer("sample_12")
     # model8 = residue(gan_input).get_layer("sample_24")
-    diff1 = subtract([model1, model8])#24x24x64
-    diff1 = Flatten()(diff1)
-    diff2 = subtract([model2, model7])#12x12x128
-    diff2 = Flatten()(diff2)
-    diff3 = subtract([model3, model6])#6x6x256
-    diff3 = Flatten()(diff3)
-    diff4 = subtract([model4, model5])#3x3x512
-    diff4 = Flatten()(diff4)
-    d1 = Dense(1024, activation='relu')(diff1)
-    d2 = Dense(1024, activation='relu')(diff2)
-    d3 = Dense(1024, activation='relu')(diff3)
-    d4 = Dense(1024, activation='relu')(diff4)
-    d = add([d1,d2])
-    d = add([d,d3])
-    d = add([d,d4])
-    d = Dense(110592, activation='relu')(d)
-    d = Reshape((192, 192, 3))(d)
+    # diff1 = subtract([model1, model8])#24x24x64
+    # diff1 = Flatten()(diff1)
+    # diff2 = subtract([model2, model7])#12x12x128
+    # diff2 = Flatten()(diff2)
+    # diff3 = subtract([model3, model6])#6x6x256
+    # diff3 = Flatten()(diff3)
+    # diff4 = subtract([model4, model5])#3x3x512
+    # diff4 = Flatten()(diff4)
+    # d1 = Dense(1024, activation='relu')(diff1)
+    # d2 = Dense(1024, activation='relu')(diff2)
+    # d3 = Dense(1024, activation='relu')(diff3)
+    # d4 = Dense(1024, activation='relu')(diff4)
+    # d = add([d1,d2])
+    # d = add([d,d3])
+    # d = add([d,d4])
+    # d = Dense(110592, activation='relu')(d)
+    # d = Reshape((192, 192, 3))(d)
+    diff1 = subtract([x1,y])
 
-    final = add([d, x])
-
-    gan_output = discriminator(final)
-    gan = Model(inputs=gan_input, outputs=[final,gan_output])
+    z = add([diff1, x])
+    # Using 2 UpSampling Blocks
+    for index in range(2):
+        model = up_sampling_block(z, 3, 256, 1)
+        
+    model = Conv2D(filters = 3, kernel_size = 9, strides = 1, padding = "same")(model)
+    model = Activation('tanh')(model)    
+    x1 = model
+    gan_output = discriminator(x1)
+    gan = Model(inputs=gan_input, outputs=[x1,gan_output])
     gan.compile(loss=[vgg_loss, "binary_crossentropy"],
                 loss_weights=[1., 1e-3],
                 optimizer=optimizer)
@@ -240,9 +265,11 @@ def train(epochs=1, batch_size=128):
     shape = (image_shape[0]//downscale_factor, image_shape[1]//downscale_factor, image_shape[2])
     
     generator = Generator(shape).generator()
+    print(generator.summary())
     discriminator = Discriminator(image_shape).discriminator()
     # attention = Attention(image_shape).attention()
     residue_data = ResidueAdd(shape).residueadd()
+    print(residue_data.summary())
 
     adam = Adam(lr=1E-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
     generator.compile(loss=vgg_loss, optimizer=adam)

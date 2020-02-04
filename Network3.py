@@ -250,7 +250,7 @@ class ResidueAdd(object):
         model = LeakyReLU(alpha = 0.2)(model)
         model = UpSampling2D((2, 2))(model)
 
-        model = Conv2D(filters = 3, kernel_size = 3, strides = 1, padding = "same")(model)
+        model = Conv2D(filters = 64, kernel_size = 3, strides = 1, padding = "same")(model)
         model = LeakyReLU(alpha = 0.2)(model)
         model = UpSampling2D((2, 2))(model)   
 
