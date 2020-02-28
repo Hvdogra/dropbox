@@ -1,13 +1,46 @@
-import os
+import matplotlib.pyplot as plt
+# plt.switch_backend('agg')
+from keras.applications.vgg19 import VGG19
+from keras.layers.core import Activation
+from keras.layers.convolutional import UpSampling2D, Conv2D
+from keras.layers.advanced_activations import LeakyReLU, PReLU
+from keras.models import Model
+from keras.layers import add, multiply, subtract, Dense, Reshape, Flatten
+from keras.optimizers import SGD, Adam, RMSprop
+import keras
+import keras.backend as K
+from keras.layers import Lambda, Input
+import tensorflow as tf
+import skimage.transform
 from skimage import data, io, filters
 import imageio
 import numpy as np
 from numpy import array
 from skimage.transform import rescale, resize
 from scipy.misc import imresize
+import os
 from keras.models import load_model
+import cv2
 
-model = load_model('gan_model15000.h5')
+np.random.seed(10)
+image_shape = (192,192,3)
+
+def PSNR(y_true, y_pred):
+    max_pixel = 1.0
+    return (10.0 * K.log((max_pixel ** 2) / (K.mean(K.square(y_pred - y_true), axis=-1)))) / 2.303
+
+def vgg_loss(y_true, y_pred):
+    
+    vgg19 = VGG19(include_top=False, weights='imagenet', input_shape=image_shape)
+    vgg19.trainable = False
+    for l in vgg19.layers:
+        l.trainable = False
+    loss_model = Model(inputs=vgg19.input, outputs=vgg19.get_layer('block5_conv4').output)
+    loss_model.trainable = False
+    return K.mean(K.square(loss_model(y_true) - loss_model(y_pred)))
+
+
+model = load_model('gan_model2000.h5', custom_objects={"vgg_loss":vgg_loss, "PSNR":PSNR})
 
 
 def load_path(path):
@@ -106,30 +139,32 @@ print(len(x_test_lr))
 
 def plot_generated_images(model, dim=(1, 3), figsize=(15, 5)):
     
-    for i in range(0,5):
-        image_batch_hr = denormalize(x_test_hr[i])
-        image_batch_lr = x_test_lr[i]
-        gen_img = model.predict(image_batch_lr)
+    # for i in range(0,5):
+        rand_nums = np.array([0,1,2,3,4])
+        image_batch_hr = denormalize(x_test_hr[rand_nums])
+        image_batch_lr = x_test_lr[rand_nums]
+        [gen_img,gan_output] = model.predict(image_batch_lr)
         generated_image = denormalize(gen_img)
         image_batch_lr = denormalize(image_batch_lr)
-        
+        for i in range(0,5):
+            print(cv2.PSNR(image_batch_hr[i], generated_image[i]))
         #generated_image = deprocess_HR(generator.predict(image_batch_lr))
         
-        plt.figure(figsize=figsize)
-        
-        plt.subplot(dim[0], dim[1], 1)
-        plt.imshow(image_batch_lr[1], interpolation='nearest')
-        plt.axis('off')
+            plt.figure(figsize=figsize)
             
-        plt.subplot(dim[0], dim[1], 2)
-        plt.imshow(generated_image[1], interpolation='nearest')
-        plt.axis('off')
-        
-        plt.subplot(dim[0], dim[1], 3)
-        plt.imshow(image_batch_hr[1], interpolation='nearest')
-        plt.axis('off')
-        
-        plt.tight_layout()
-        plt.savefig('output1/gan_generated_image_epoch_%d.png' % i)
+            plt.subplot(dim[0], dim[1], 1)
+            plt.imshow(image_batch_lr[i], interpolation='nearest')
+            plt.axis('off')
+                
+            plt.subplot(dim[0], dim[1], 2)
+            plt.imshow(generated_image[i], interpolation='nearest')
+            plt.axis('off')
+            
+            plt.subplot(dim[0], dim[1], 3)
+            plt.imshow(image_batch_hr[i], interpolation='nearest')
+            plt.axis('off')
+            
+            plt.tight_layout()
+            plt.savefig('output5/gan_generated_image_epoch_%d.png' % i)
 
 plot_generated_images(model)
